@@ -102,10 +102,9 @@ LOGO_B64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABt
 LOGO_HTML = f'<img src="data:image/png;base64,{LOGO_B64}" />'
 
 
-# CSS corporativo
+# CSS corporativo (compatível com dark/light mode)
 st.markdown(f"""
 <style>
-    /* Importar fonte corporativa */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"]  {{
@@ -124,9 +123,8 @@ st.markdown(f"""
         max-width: 1400px;
     }}
 
-    /* Headings */
+    /* Headings — usa cor padrão do tema, não força preto/branco */
     h1 {{
-        color: #1a1a1a;
         font-weight: 700;
         font-size: 1.875rem;
         letter-spacing: -0.025em;
@@ -134,23 +132,22 @@ st.markdown(f"""
         padding-bottom: 0 !important;
     }}
     h2 {{
-        color: #1a1a1a;
         font-weight: 600;
         font-size: 1.25rem;
         letter-spacing: -0.015em;
-        border-bottom: 2px solid #f0f0f0;
+        border-bottom: 2px solid rgba(128,128,128,0.15);
         padding-bottom: 0.5rem;
         margin-top: 2rem;
     }}
     h3 {{
-        color: #4a4a4a;
         font-weight: 600;
         font-size: 1rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        opacity: 0.75;
     }}
 
-    /* SIDEBAR */
+    /* SIDEBAR — sempre escura, independente do tema */
     [data-testid="stSidebar"] {{
         background: linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 100%);
         border-right: 1px solid #333;
@@ -159,29 +156,28 @@ st.markdown(f"""
         color: #f0f0f0 !important;
     }}
     [data-testid="stSidebar"] .sidebar-logo {{
-        padding: 1.5rem 0.5rem 1rem 0.5rem;
+        padding: 1rem 0.5rem 0.75rem 0.5rem;
         border-bottom: 1px solid #333;
         margin-bottom: 1rem;
     }}
     [data-testid="stSidebar"] .sidebar-logo img {{
         width: 100%;
-        max-width: 180px;
+        max-width: 160px;
         height: auto;
         display: block;
-        margin: 0 auto;
+        margin: 0 auto 0.5rem auto;
     }}
     [data-testid="stSidebar"] .sidebar-subtitle {{
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         color: #888 !important;
         text-transform: uppercase;
-        letter-spacing: 0.1em;
+        letter-spacing: 0.15em;
         text-align: center;
-        margin-top: 0.5rem;
-        font-weight: 500;
+        font-weight: 600;
     }}
     [data-testid="stSidebar"] .sidebar-user {{
         padding: 0.75rem 1rem;
-        background: rgba(255,90,0,0.08);
+        background: rgba(255,90,0,0.1);
         border-left: 3px solid {BRAND_ORANGE};
         border-radius: 4px;
         margin-bottom: 1rem;
@@ -191,53 +187,43 @@ st.markdown(f"""
         color: #f0f0f0 !important;
         font-weight: 500;
     }}
-    [data-testid="stSidebar"] .stRadio > div {{
-        gap: 0.25rem;
-    }}
 
-    /* Botões */
+    /* Botões — laranja Grupo JET */
     .stButton > button {{
         background-color: {BRAND_ORANGE};
-        color: white;
+        color: white !important;
         border: none;
         border-radius: 6px;
         font-weight: 600;
         padding: 0.5rem 1.5rem;
         transition: all 0.2s;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }}
     .stButton > button:hover {{
         background-color: {BRAND_DARK};
-        color: white;
+        color: white !important;
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(255,90,0,0.25);
     }}
 
-    /* KPI Cards (st.metric) */
+    /* KPI Cards (st.metric) — visual elegante em qualquer tema */
     [data-testid="stMetric"] {{
-        background: white;
-        border: 1px solid #e8e8e8;
+        background: rgba(128,128,128,0.04);
+        border: 1px solid rgba(128,128,128,0.15);
         border-radius: 8px;
-        padding: 1.25rem 1.5rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        transition: all 0.2s;
-    }}
-    [data-testid="stMetric"]:hover {{
-        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-        border-color: #d0d0d0;
+        padding: 1rem 1.25rem;
     }}
     [data-testid="stMetricLabel"] {{
-        color: #6b6b6b;
         font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         font-weight: 600;
+        opacity: 0.7;
     }}
     [data-testid="stMetricValue"] {{
-        color: #1a1a1a;
         font-weight: 700;
-        font-size: 1.875rem;
+        font-size: 1.5rem;
         letter-spacing: -0.025em;
+        color: {BRAND_ORANGE};
     }}
     [data-testid="stMetricDelta"] {{
         font-size: 0.8rem;
@@ -246,95 +232,79 @@ st.markdown(f"""
 
     /* DataFrame */
     [data-testid="stDataFrame"] {{
-        border: 1px solid #e8e8e8;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }}
-
-    /* Inputs */
-    .stTextInput input, .stDateInput input, .stSelectbox select {{
+        border: 1px solid rgba(128,128,128,0.2);
         border-radius: 6px;
-        border-color: #d0d0d0;
     }}
 
     /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {{
-        gap: 0;
-        border-bottom: 2px solid #f0f0f0;
-    }}
     .stTabs [data-baseweb="tab"] {{
         font-weight: 500;
-        color: #6b6b6b;
-        padding: 0.75rem 1.5rem;
+        padding: 0.5rem 1.25rem;
     }}
     .stTabs [aria-selected="true"] {{
         color: {BRAND_ORANGE} !important;
-        border-bottom: 2px solid {BRAND_ORANGE} !important;
-        background: transparent !important;
+        border-bottom-color: {BRAND_ORANGE} !important;
     }}
 
-    /* Alerts (info, success, warning, error) — mais corporativos */
+    /* Alerts */
     .stAlert {{
-        border-radius: 8px;
+        border-radius: 6px;
         border-left-width: 4px;
-        padding: 1rem 1.25rem;
     }}
 
-    /* Login screen */
+    /* Login screen — bloco isolado central */
     .login-container {{
-        max-width: 420px;
-        margin: 4rem auto 2rem auto;
-        padding: 2.5rem 2rem;
-        background: white;
+        max-width: 380px;
+        margin: 3rem auto 1rem auto;
+        padding: 1.5rem;
+        background: rgba(128,128,128,0.04);
         border-radius: 12px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
-        border: 1px solid #f0f0f0;
+        border: 1px solid rgba(128,128,128,0.15);
     }}
     .login-logo {{
-        background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
-        padding: 2rem 1.5rem;
+        background: linear-gradient(135deg, #0a0a0a 0%, #2a2a2a 100%);
+        padding: 1.5rem;
         border-radius: 8px;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
         text-align: center;
     }}
     .login-logo img {{
-        max-width: 240px;
-        width: 90%;
+        max-width: 200px;
+        width: 80%;
         height: auto;
     }}
     .login-tagline {{
         text-align: center;
-        color: #6b6b6b;
-        font-size: 0.85rem;
-        margin-bottom: 1.5rem;
-        letter-spacing: 0.02em;
+        font-size: 0.7rem;
+        letter-spacing: 0.15em;
+        opacity: 0.6;
+        font-weight: 600;
     }}
 
-    /* Page header — usado em cada página */
+    /* Page header */
     .page-header {{
-        border-bottom: 1px solid #f0f0f0;
+        border-bottom: 1px solid rgba(128,128,128,0.15);
         padding-bottom: 1rem;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
     }}
     .page-eyebrow {{
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: {BRAND_ORANGE};
         text-transform: uppercase;
-        letter-spacing: 0.1em;
-        font-weight: 600;
+        letter-spacing: 0.12em;
+        font-weight: 700;
         margin-bottom: 0.25rem;
     }}
     .page-subtitle {{
-        color: #6b6b6b;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
+        opacity: 0.7;
         margin-top: 0.25rem;
     }}
 
-    /* Divider mais sutil */
+    /* Divider */
     hr {{
-        border-color: #f0f0f0;
-        margin: 2rem 0;
+        border-color: rgba(128,128,128,0.15);
+        margin: 1.5rem 0;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -403,24 +373,31 @@ def login():
         config["cookie"]["expiry_days"],
     )
 
-    # Container de login com logo e visual corporativo
-    st.markdown(f"""
-    <div class="login-container">
-        <div class="login-logo">
-            {LOGO_HTML}
+    # Verificar se já está autenticado (evita renderizar tela de login depois de logado)
+    already_authenticated = st.session_state.get("authentication_status") is True
+
+    # Só mostra o card de logo na tela de login se NÃO estiver autenticado
+    login_container = st.empty()
+    if not already_authenticated:
+        login_container.markdown(f"""
+        <div class="login-container">
+            <div class="login-logo">
+                {LOGO_HTML}
+            </div>
+            <div class="login-tagline">PLATAFORMA DE BI FINANCEIRO</div>
         </div>
-        <div class="login-tagline">PLATAFORMA DE BI FINANCEIRO</div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     # API 0.3.2: login() retorna tuple (name, auth_status, username)
     try:
         name, auth_status, username = authenticator.login(location="main")
     except TypeError:
-        # Fallback para versões mais antigas que usam posicional
         name, auth_status, username = authenticator.login("Login", "main")
 
-    if auth_status is False:
+    # Se autenticou agora, limpa o card de logo
+    if auth_status is True:
+        login_container.empty()
+    elif auth_status is False:
         st.error("Usuário ou senha inválidos.")
     elif auth_status is None:
         st.info("Faça login para continuar.")
