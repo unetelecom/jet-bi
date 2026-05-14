@@ -45,56 +45,311 @@ BRAND_LIGHT = "#FFA366"
 BRAND_DARK = "#CC4800"
 GRAY = "#6B6B6B"
 
-# Custom CSS
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS DE FORMATAÇÃO BRASILEIRA (R$ 1.234.567,89)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fmt_brl(valor, decimais=2) -> str:
+    """Formata número como moeda Real BR: R$ 1.234.567,89"""
+    if valor is None or pd.isna(valor):
+        return "—"
+    try:
+        v = float(valor)
+        s = f"{v:,.{decimais}f}"
+        # US (1,234,567.89) → BR (1.234.567,89)
+        s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {s}"
+    except (ValueError, TypeError):
+        return "—"
+
+
+def fmt_num(valor) -> str:
+    """Formata inteiro com separador BR: 1.234.567"""
+    if valor is None or pd.isna(valor):
+        return "—"
+    try:
+        return f"{int(valor):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return "—"
+
+def format_df_brl(df, money_cols=None, num_cols=None, pct_cols=None):
+    """Retorna cópia do DataFrame com colunas monetárias/numéricas formatadas em pt-BR.
+
+    money_cols: lista de colunas de moeda (R$ 1.234,56)
+    num_cols: lista de colunas inteiras (1.234)
+    pct_cols: lista de colunas percentuais (12,3%)
+    """
+    if len(df) == 0:
+        return df
+    df = df.copy()
+    for col in (money_cols or []):
+        if col in df.columns:
+            df[col] = df[col].apply(lambda v: fmt_brl(v, 2) if pd.notna(v) else "—")
+    for col in (num_cols or []):
+        if col in df.columns:
+            df[col] = df[col].apply(lambda v: fmt_num(v) if pd.notna(v) else "—")
+    for col in (pct_cols or []):
+        if col in df.columns:
+            df[col] = df[col].apply(lambda v: f"{v:.1f}%".replace(".", ",") if pd.notna(v) else "—")
+    return df
+
+
+
+
+# Logo Grupo JET (embutido em base64)
+LOGO_B64 = "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"
+LOGO_HTML = f'<img src="data:image/png;base64,{LOGO_B64}" />'
+
+
+# CSS corporativo
 st.markdown(f"""
 <style>
-    /* Hide Streamlit footer */
+    /* Importar fonte corporativa */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    html, body, [class*="css"]  {{
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }}
+
+    /* Esconder Streamlit defaults */
     footer {{visibility: hidden;}}
     #MainMenu {{visibility: hidden;}}
+    header[data-testid="stHeader"] {{background: transparent;}}
 
-    /* Headers brand color */
-    h1, h2, h3 {{
-        color: {BRAND_ORANGE};
-        font-weight: 600;
+    /* Container principal */
+    .main .block-container {{
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+        max-width: 1400px;
     }}
 
-    /* Sidebar */
+    /* Headings */
+    h1 {{
+        color: #1a1a1a;
+        font-weight: 700;
+        font-size: 1.875rem;
+        letter-spacing: -0.025em;
+        margin-bottom: 0.25rem !important;
+        padding-bottom: 0 !important;
+    }}
+    h2 {{
+        color: #1a1a1a;
+        font-weight: 600;
+        font-size: 1.25rem;
+        letter-spacing: -0.015em;
+        border-bottom: 2px solid #f0f0f0;
+        padding-bottom: 0.5rem;
+        margin-top: 2rem;
+    }}
+    h3 {{
+        color: #4a4a4a;
+        font-weight: 600;
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }}
+
+    /* SIDEBAR */
     [data-testid="stSidebar"] {{
-        background-color: #1a1a1a;
+        background: linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 100%);
+        border-right: 1px solid #333;
     }}
     [data-testid="stSidebar"] * {{
-        color: #ffffff !important;
+        color: #f0f0f0 !important;
+    }}
+    [data-testid="stSidebar"] .sidebar-logo {{
+        padding: 1.5rem 0.5rem 1rem 0.5rem;
+        border-bottom: 1px solid #333;
+        margin-bottom: 1rem;
+    }}
+    [data-testid="stSidebar"] .sidebar-logo img {{
+        width: 100%;
+        max-width: 180px;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+    }}
+    [data-testid="stSidebar"] .sidebar-subtitle {{
+        font-size: 0.7rem;
+        color: #888 !important;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        text-align: center;
+        margin-top: 0.5rem;
+        font-weight: 500;
+    }}
+    [data-testid="stSidebar"] .sidebar-user {{
+        padding: 0.75rem 1rem;
+        background: rgba(255,90,0,0.08);
+        border-left: 3px solid {BRAND_ORANGE};
+        border-radius: 4px;
+        margin-bottom: 1rem;
+        font-size: 0.85rem;
     }}
     [data-testid="stSidebar"] .stRadio > label {{
-        color: #ffffff !important;
+        color: #f0f0f0 !important;
+        font-weight: 500;
+    }}
+    [data-testid="stSidebar"] .stRadio > div {{
+        gap: 0.25rem;
     }}
 
-    /* Buttons */
+    /* Botões */
     .stButton > button {{
         background-color: {BRAND_ORANGE};
         color: white;
         border: none;
-        border-radius: 4px;
-        font-weight: 500;
+        border-radius: 6px;
+        font-weight: 600;
+        padding: 0.5rem 1.5rem;
+        transition: all 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }}
     .stButton > button:hover {{
         background-color: {BRAND_DARK};
         color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(255,90,0,0.25);
     }}
 
-    /* Metric cards */
+    /* KPI Cards (st.metric) */
+    [data-testid="stMetric"] {{
+        background: white;
+        border: 1px solid #e8e8e8;
+        border-radius: 8px;
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        transition: all 0.2s;
+    }}
+    [data-testid="stMetric"]:hover {{
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        border-color: #d0d0d0;
+    }}
+    [data-testid="stMetricLabel"] {{
+        color: #6b6b6b;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+    }}
     [data-testid="stMetricValue"] {{
-        color: {BRAND_ORANGE};
+        color: #1a1a1a;
         font-weight: 700;
+        font-size: 1.875rem;
+        letter-spacing: -0.025em;
+    }}
+    [data-testid="stMetricDelta"] {{
+        font-size: 0.8rem;
+        font-weight: 500;
     }}
 
-    /* Dataframe */
+    /* DataFrame */
     [data-testid="stDataFrame"] {{
-        border: 1px solid #e0e0e0;
-        border-radius: 4px;
+        border: 1px solid #e8e8e8;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }}
+
+    /* Inputs */
+    .stTextInput input, .stDateInput input, .stSelectbox select {{
+        border-radius: 6px;
+        border-color: #d0d0d0;
+    }}
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 0;
+        border-bottom: 2px solid #f0f0f0;
+    }}
+    .stTabs [data-baseweb="tab"] {{
+        font-weight: 500;
+        color: #6b6b6b;
+        padding: 0.75rem 1.5rem;
+    }}
+    .stTabs [aria-selected="true"] {{
+        color: {BRAND_ORANGE} !important;
+        border-bottom: 2px solid {BRAND_ORANGE} !important;
+        background: transparent !important;
+    }}
+
+    /* Alerts (info, success, warning, error) — mais corporativos */
+    .stAlert {{
+        border-radius: 8px;
+        border-left-width: 4px;
+        padding: 1rem 1.25rem;
+    }}
+
+    /* Login screen */
+    .login-container {{
+        max-width: 420px;
+        margin: 4rem auto 2rem auto;
+        padding: 2.5rem 2rem;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+        border: 1px solid #f0f0f0;
+    }}
+    .login-logo {{
+        background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+        padding: 2rem 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 2rem;
+        text-align: center;
+    }}
+    .login-logo img {{
+        max-width: 240px;
+        width: 90%;
+        height: auto;
+    }}
+    .login-tagline {{
+        text-align: center;
+        color: #6b6b6b;
+        font-size: 0.85rem;
+        margin-bottom: 1.5rem;
+        letter-spacing: 0.02em;
+    }}
+
+    /* Page header — usado em cada página */
+    .page-header {{
+        border-bottom: 1px solid #f0f0f0;
+        padding-bottom: 1rem;
+        margin-bottom: 2rem;
+    }}
+    .page-eyebrow {{
+        font-size: 0.75rem;
+        color: {BRAND_ORANGE};
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }}
+    .page-subtitle {{
+        color: #6b6b6b;
+        font-size: 0.95rem;
+        margin-top: 0.25rem;
+    }}
+
+    /* Divider mais sutil */
+    hr {{
+        border-color: #f0f0f0;
+        margin: 2rem 0;
     }}
 </style>
 """, unsafe_allow_html=True)
+
+
+def page_header(eyebrow: str, title: str, subtitle: str = ""):
+    """Renderiza um cabeçalho corporativo padronizado para cada página."""
+    sub_html = f'<div class="page-subtitle">{subtitle}</div>' if subtitle else ''
+    st.markdown(f"""
+    <div class="page-header">
+        <div class="page-eyebrow">{eyebrow}</div>
+        <h1 style="margin:0;">{title}</h1>
+        {sub_html}
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -148,11 +403,15 @@ def login():
         config["cookie"]["expiry_days"],
     )
 
-    # Logo / título antes do login
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown(f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>JET BI</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #888;'>Plataforma de BI Financeiro · Grupo JET</p>", unsafe_allow_html=True)
+    # Container de login com logo e visual corporativo
+    st.markdown(f"""
+    <div class="login-container">
+        <div class="login-logo">
+            {LOGO_HTML}
+        </div>
+        <div class="login-tagline">PLATAFORMA DE BI FINANCEIRO</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # API 0.3.2: login() retorna tuple (name, auth_status, username)
     try:
@@ -659,8 +918,7 @@ def run_match(fat: pd.DataFrame, ext: pd.DataFrame, date_start: str, date_end: s
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def page_hubsoft_api():
-    st.title("🔌 Importar do HubSoft")
-    st.markdown("Sincroniza diretamente com a API do HubSoft — sem precisar exportar XLSX.")
+    page_header("INTEGRAÇÃO API", "Importar do HubSoft", "Sincroniza diretamente com a API do HubSoft — sem precisar exportar XLSX")
 
     # Verificar se há credenciais em secrets
     has_secrets = False
@@ -747,7 +1005,7 @@ def page_hubsoft_api():
             st.session_state['fat'] = df
             st.session_state['hubsoft_sync_time'] = datetime.now()
 
-            status.success(f"✅ Pronto! {len(df)} faturas importadas · R$ {df['valor'].sum():,.2f} faturado.")
+            status.success(f"✅ Pronto! {len(df)} faturas importadas · {fmt_brl(df['valor'].sum(), 2)} faturado.")
             st.balloons()
 
             # Mostra preview
@@ -802,8 +1060,7 @@ Depois, basta clicar em **"Sincronizar Faturas Agora"** sem precisar digitar nad
 
 
 def page_upload():
-    st.title("📥 Upload de Dados")
-    st.markdown("Arraste os arquivos abaixo. O sistema identifica o tipo automaticamente.")
+    page_header("UPLOAD", "Upload de Dados", "Arraste os arquivos abaixo — o sistema identifica o tipo automaticamente")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -832,7 +1089,7 @@ def page_upload():
             # HubSoft
             fat = parse_hubsoft_xlsx(hubsoft_file)
             st.session_state['fat'] = fat
-            st.success(f"✓ HubSoft: {len(fat)} faturas · R$ {fat['valor'].sum():,.2f} faturado")
+            st.success(f"✓ HubSoft: {len(fat)} faturas · {fmt_brl(fat['valor'].sum(), 2)} faturado")
 
             # Extratos
             all_ext = []
@@ -872,13 +1129,13 @@ def page_upload():
         st.subheader("📊 Dados Atualmente Carregados")
         c1, c2, c3 = st.columns(3)
         c1.metric("Faturas", f"{len(st.session_state['fat']):,}")
-        c2.metric("Faturado", f"R$ {st.session_state['fat']['valor'].sum():,.0f}")
+        c2.metric("Faturado", f"{fmt_brl(st.session_state['fat']['valor'].sum(), 0)}")
         if 'ext' in st.session_state:
             c3.metric("Transações Banco", f"{len(st.session_state['ext']):,}")
 
 
 def page_resumo():
-    st.title("📊 Resumo Executivo")
+    page_header("VISÃO GERAL", "Resumo Executivo", "Indicadores-chave do financeiro consolidado")
 
     if 'fat' not in st.session_state:
         st.warning("Você precisa fazer upload dos dados primeiro (página Upload).")
@@ -894,11 +1151,11 @@ def page_resumo():
     vencidas = em_aberto[em_aberto['data_vencimento'] < HOJE]
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Faturado", f"R$ {fat['valor'].sum():,.0f}", f"{len(fat)} faturas")
-    col2.metric("Pago (HubSoft)", f"R$ {fat['valor_pago'].sum():,.0f}", f"{fat['valor_pago'].sum()/fat['valor'].sum()*100:.1f}% cobrado")
-    col3.metric("Vencido", f"R$ {vencidas['valor'].sum():,.0f}", f"{len(vencidas)} faturas", delta_color="inverse")
+    col1.metric("Faturado", f"{fmt_brl(fat['valor'].sum(), 0)}", f"{len(fat)} faturas")
+    col2.metric("Pago (HubSoft)", f"{fmt_brl(fat['valor_pago'].sum(), 0)}", f"{fat['valor_pago'].sum()/fat['valor'].sum()*100:.1f}% cobrado")
+    col3.metric("Vencido", f"{fmt_brl(vencidas['valor'].sum(), 0)}", f"{len(vencidas)} faturas", delta_color="inverse")
     if len(ext) > 0:
-        col4.metric("Recebido nos Bancos", f"R$ {ext['Valor'].sum():,.0f}", f"{len(ext)} transações")
+        col4.metric("Recebido nos Bancos", f"{fmt_brl(ext['Valor'].sum(), 0)}", f"{len(ext)} transações")
 
     # Conciliação
     if len(fat_match) > 0:
@@ -908,8 +1165,8 @@ def page_resumo():
         pct = len(matched) / len(fat_match) * 100
         c1, c2, c3 = st.columns(3)
         c1.metric("Taxa de Conciliação", f"{pct:.1f}%", f"{len(matched)}/{len(fat_match)}")
-        c2.metric("Valor Conciliado", f"R$ {matched['valor_pago'].sum():,.0f}")
-        c3.metric("Pendente Investigação", f"R$ {fat_match[fat_match['matched_ext_id'].isna()]['valor_pago'].sum():,.0f}")
+        c2.metric("Valor Conciliado", f"{fmt_brl(matched['valor_pago'].sum(), 0)}")
+        c3.metric("Pendente Investigação", f"{fmt_brl(fat_match[fat_match['matched_ext_id'].isna()]['valor_pago'].sum(), 0)}")
 
     # Gráfico mensal
     st.divider()
@@ -932,13 +1189,13 @@ def page_resumo():
         fig.add_trace(go.Bar(name='Recebido Banco', x=df_plot['Mês'], y=df_plot['Recebido Banco'], marker_color=BRAND_ORANGE))
     fig.update_layout(
         barmode='group', height=400, hovermode='x unified',
-        yaxis_tickformat='R$ ,.0f', yaxis_title='R$',
+        yaxis_tickformat=',.0f', yaxis_title='R$', separators=',.',
     )
     st.plotly_chart(fig, use_container_width=True)
 
 
 def page_conciliacao():
-    st.title("🔍 Conciliação Bancária")
+    page_header("CONCILIAÇÃO", "Conciliação Bancária", "Cruzamento entre faturas pagas no HubSoft × créditos efetivos nos bancos")
     if 'fat_match' not in st.session_state:
         st.warning("Faça upload dos dados primeiro.")
         return
@@ -951,49 +1208,46 @@ def page_conciliacao():
     ext_unused = ext[~ext['used']] if 'used' in ext.columns else pd.DataFrame()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Conciliadas", f"{len(matched)}", f"R$ {matched['valor_pago'].sum():,.0f}")
-    c2.metric("Sem Match Banco", f"{len(unmatched)}", f"R$ {unmatched['valor_pago'].sum():,.0f}", delta_color="inverse")
-    c3.metric("Banco s/ Fatura", f"{len(ext_unused)}", f"R$ {ext_unused['Valor'].sum() if len(ext_unused)>0 else 0:,.0f}", delta_color="inverse")
+    c1.metric("Conciliadas", f"{len(matched)}", f"{fmt_brl(matched['valor_pago'].sum(), 0)}")
+    c2.metric("Sem Match Banco", f"{len(unmatched)}", f"{fmt_brl(unmatched['valor_pago'].sum(), 0)}", delta_color="inverse")
+    c3.metric("Banco s/ Fatura", f"{len(ext_unused)}", f"{fmt_brl(ext_unused['Valor'].sum() if len(ext_unused)>0 else 0, 0)}", delta_color="inverse")
 
     tab1, tab2, tab3 = st.tabs(["✅ Conciliadas", "🔴 Faturas s/ Match", "❓ Banco s/ Fatura"])
 
     with tab1:
-        st.dataframe(
-            matched[['codigo_cliente', 'nome_razaosocial', 'nosso_numero', 'valor_pago',
-                     'data_pagamento', 'ext_banco', 'ext_data', 'ext_desc']]
-            .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
-                             'nosso_numero': 'Nosso Nº', 'valor_pago': 'Pago',
-                             'data_pagamento': 'Data Pgto', 'ext_banco': 'Banco',
-                             'ext_data': 'Data Banco', 'ext_desc': 'Descrição'})
-            .sort_values('Pago', ascending=False),
-            use_container_width=True, height=500
-        )
+        df_disp = (matched[['codigo_cliente', 'nome_razaosocial', 'nosso_numero', 'valor_pago',
+                            'data_pagamento', 'ext_banco', 'ext_data', 'ext_desc']]
+                   .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
+                                    'nosso_numero': 'Nosso Nº', 'valor_pago': 'Pago',
+                                    'data_pagamento': 'Data Pgto', 'ext_banco': 'Banco',
+                                    'ext_data': 'Data Banco', 'ext_desc': 'Descrição'})
+                   .sort_values('Pago', ascending=False))
+        st.dataframe(format_df_brl(df_disp, money_cols=['Pago']),
+                     use_container_width=True, height=500)
 
     with tab2:
         st.markdown(f"**{len(unmatched)} faturas marcadas como pagas no HubSoft mas sem comprovante bancário.**")
-        st.dataframe(
-            unmatched[['codigo_cliente', 'nome_razaosocial', 'nosso_numero', 'valor_pago',
-                       'data_pagamento', 'forma_cobranca']]
-            .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
-                             'nosso_numero': 'Nosso Nº', 'valor_pago': 'Pago',
-                             'data_pagamento': 'Data Pgto', 'forma_cobranca': 'Forma'})
-            .sort_values('Pago', ascending=False),
-            use_container_width=True, height=500
-        )
+        df_disp = (unmatched[['codigo_cliente', 'nome_razaosocial', 'nosso_numero', 'valor_pago',
+                              'data_pagamento', 'forma_cobranca']]
+                   .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
+                                    'nosso_numero': 'Nosso Nº', 'valor_pago': 'Pago',
+                                    'data_pagamento': 'Data Pgto', 'forma_cobranca': 'Forma'})
+                   .sort_values('Pago', ascending=False))
+        st.dataframe(format_df_brl(df_disp, money_cols=['Pago']),
+                     use_container_width=True, height=500)
 
     with tab3:
         if len(ext_unused) > 0:
             st.markdown(f"**{len(ext_unused)} créditos no banco que não acharam fatura correspondente.**")
-            st.dataframe(
-                ext_unused[['banco', 'Data', 'Valor', 'memo']]
-                .rename(columns={'memo': 'Descrição'})
-                .sort_values('Valor', ascending=False),
-                use_container_width=True, height=500
-            )
+            df_disp = (ext_unused[['banco', 'Data', 'Valor', 'memo']]
+                       .rename(columns={'memo': 'Descrição'})
+                       .sort_values('Valor', ascending=False))
+            st.dataframe(format_df_brl(df_disp, money_cols=['Valor']),
+                         use_container_width=True, height=500)
 
 
 def page_inadimplencia():
-    st.title("🚨 Inadimplência")
+    page_header("COBRANÇA", "Inadimplência", "Faturas vencidas — aging, valores e priorização por cliente")
     if 'fat' not in st.session_state:
         st.warning("Faça upload dos dados primeiro.")
         return
@@ -1018,15 +1272,15 @@ def page_inadimplencia():
     vencidas['dias_atraso'] = (HOJE - vencidas['data_vencimento']).dt.days
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Vencido", f"R$ {vencidas['valor'].sum():,.0f}", f"{len(vencidas)} faturas")
+    c1.metric("Total Vencido", f"{fmt_brl(vencidas['valor'].sum(), 0)}", f"{len(vencidas)} faturas")
     c2.metric("Clientes Inadimplentes", f"{vencidas['codigo_cliente'].nunique() if len(vencidas) > 0 else 0}")
     over_90 = vencidas[vencidas['dias_atraso'] > 90] if len(vencidas) > 0 else pd.DataFrame()
-    c3.metric("Acima de 90 dias", f"R$ {over_90['valor'].sum() if len(over_90) > 0 else 0:,.0f}",
+    c3.metric("Acima de 90 dias", f"{fmt_brl(over_90['valor'].sum() if len(over_90) > 0 else 0, 0)}",
               f"{len(over_90)} faturas (jurídico)", delta_color="inverse")
 
     if len(vencidas) == 0:
         st.success("🎉 Nenhuma fatura vencida! Toda a carteira está em dia.")
-        st.info(f"Carteira a vencer: {len(em_aberto)} faturas · R$ {em_aberto['valor'].sum():,.2f}")
+        st.info(f"Carteira a vencer: {len(em_aberto)} faturas · {fmt_brl(em_aberto['valor'].sum(), 2)}")
         return
 
     # Aging
@@ -1046,7 +1300,7 @@ def page_inadimplencia():
                      color='Faixa',
                      color_discrete_sequence=['#FFEB9C', '#FFD966', '#FFCC99', '#FF9966', '#FF6666', '#CC0000'])
         fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
-        fig.update_layout(height=400, showlegend=False, yaxis_tickformat='R$ ,.0f')
+        fig.update_layout(height=400, showlegend=False, yaxis_tickformat=',.0f', separators=',.')
         st.plotly_chart(fig, use_container_width=True)
 
     # Top inadimplentes
@@ -1058,11 +1312,12 @@ def page_inadimplencia():
         Valor=('valor', 'sum'),
         Atraso_Max=('dias_atraso', 'max'),
     ).reset_index().sort_values('Valor', ascending=False)
-    st.dataframe(top, use_container_width=True, height=500)
+    st.dataframe(format_df_brl(top, money_cols=['Valor']),
+                 use_container_width=True, height=500)
 
 
 def page_clientes():
-    st.title("👥 Clientes")
+    page_header("CARTEIRA", "Clientes", "Base completa de clientes com classificação Empresa / Governo / Pessoa Física")
     if 'fat' not in st.session_state:
         st.warning("Faça upload dos dados primeiro.")
         return
@@ -1098,7 +1353,7 @@ def page_clientes():
     if only_inad:
         df = df[df['Em_Aberto'] > 0]
 
-    st.markdown(f"**{len(df)} clientes · R$ {df['Faturado'].sum():,.2f} faturado**")
+    st.markdown(f"**{len(df)} clientes · {fmt_brl(df['Faturado'].sum(), 2)} faturado**")
 
     # Cards summary
     c1, c2, c3 = st.columns(3)
@@ -1107,20 +1362,21 @@ def page_clientes():
         col.markdown(f"<div style='padding:1rem;background:{color}22;border-left:4px solid {color};border-radius:4px'>"
                      f"<div style='font-size:11px;color:#666'>{cat.upper()}</div>"
                      f"<div style='font-size:22px;font-weight:600'>{len(sub)} clientes</div>"
-                     f"<div style='font-size:13px;color:#444'>R$ {sub['Faturado'].sum():,.0f}</div>"
+                     f"<div style='font-size:13px;color:#444'>{fmt_brl(sub['Faturado'].sum(), 0)}</div>"
                      f"</div>", unsafe_allow_html=True)
 
+    df_disp = (df[['codigo_cliente', 'nome_razaosocial', 'cpf_cnpj', 'Categoria',
+                   'Faturas', 'Faturado', 'Pago', '% Pago', 'Em_Aberto']]
+               .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
+                                'cpf_cnpj': 'CPF/CNPJ', 'Em_Aberto': 'Em Aberto'}))
     st.dataframe(
-        df[['codigo_cliente', 'nome_razaosocial', 'cpf_cnpj', 'Categoria',
-            'Faturas', 'Faturado', 'Pago', '% Pago', 'Em_Aberto']]
-        .rename(columns={'codigo_cliente': 'Cód', 'nome_razaosocial': 'Cliente',
-                         'cpf_cnpj': 'CPF/CNPJ', 'Em_Aberto': 'Em Aberto'}),
+        format_df_brl(df_disp, money_cols=['Faturado', 'Pago', 'Em Aberto'], pct_cols=['% Pago']),
         use_container_width=True, height=600
     )
 
 
 def page_top_clientes():
-    st.title("🏆 Top Clientes")
+    page_header("RANKING", "Top Clientes", "Maiores pagantes acumulados no período carregado")
     if 'fat' not in st.session_state:
         st.warning("Faça upload dos dados primeiro.")
         return
@@ -1137,17 +1393,17 @@ def page_top_clientes():
                  text='Pago', color_discrete_sequence=[BRAND_ORANGE])
     fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
     fig.update_layout(height=max(500, top_n * 30), showlegend=False,
-                      xaxis_tickformat='R$ ,.0f', yaxis_title=None,
+                      xaxis_tickformat=',.0f', yaxis_title=None, separators=',.',
                       yaxis={'categoryorder': 'total ascending'})
     st.plotly_chart(fig, use_container_width=True)
 
     total_top = top['Pago'].sum()
     total_geral = fat['valor_pago'].sum()
-    st.info(f"**Top {top_n}** = R$ {total_top:,.2f} · {total_top/total_geral*100:.1f}% da receita total")
+    st.info(f"**Top {top_n}** = {fmt_brl(total_top, 2)} · {total_top/total_geral*100:.1f}% da receita total")
 
 
 def page_exportar():
-    st.title("💾 Exportar Relatórios")
+    page_header("EXPORTAÇÃO", "Relatórios", "Gere planilhas consolidadas em XLSX para distribuir")
     if 'fat' not in st.session_state:
         st.warning("Faça upload dos dados primeiro.")
         return
@@ -1193,11 +1449,18 @@ def main():
     if not auth_status:
         return
 
-    # Sidebar
+    # Sidebar com logo
     with st.sidebar:
-        st.markdown(f"<h2 style='color: {BRAND_ORANGE}'>JET BI</h2>", unsafe_allow_html=True)
-        st.markdown(f"<small>Logado: <b>{name}</b></small>", unsafe_allow_html=True)
-        st.divider()
+        st.markdown(f"""
+        <div class="sidebar-logo">
+            {LOGO_HTML}
+            <div class="sidebar-subtitle">JET BI</div>
+        </div>
+        <div class="sidebar-user">
+            <div style="font-size:0.7rem;color:#888;text-transform:uppercase;letter-spacing:0.05em;">Logado como</div>
+            <div style="font-weight:600;color:#fff;">{name}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         pagina = st.radio(
             "Menu",
