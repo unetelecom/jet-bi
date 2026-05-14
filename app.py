@@ -364,134 +364,108 @@ def hubsoft_get_invoices(url: str, token: str, progress_cb=None,
         except Exception:
             raise ValueError(f"Resposta da API não é JSON válido: {resp.text[:300]}")
 
-        # API HubSoft retorna geralmente: {"status": "success", "faturas": [...], "paginacao": {...}}
+        # API HubSoft retorna: {"status": "success", "faturas": [...], "paginacao": {...}}
         if isinstance(data, dict):
             invoices = (data.get("faturas") or data.get("data") or
                        data.get("results") or data.get("itens") or [])
             # Pegar info de paginação se disponível
-            pag_info = data.get("paginacao", {})
-            total_paginas = pag_info.get("total_de_paginas") or pag_info.get("total_paginas")
+            pag_info = data.get("paginacao") or {}
+            if isinstance(pag_info, dict):
+                total_paginas = (pag_info.get("total_de_paginas") or
+                                 pag_info.get("total_paginas") or
+                                 pag_info.get("total"))
+                pagina_atual = (pag_info.get("pagina_atual") or
+                               pag_info.get("pagina") or pagina)
+            else:
+                total_paginas = None
+                pagina_atual = pagina
         else:
             invoices = data
             total_paginas = None
+            pagina_atual = pagina
 
         if not invoices:
             break
         all_invoices.extend(invoices)
         if progress_cb:
+            extra = f" (página {pagina_atual}/{total_paginas})" if total_paginas else f" (página {pagina_atual})"
             progress_cb(len(all_invoices))
 
         # Critério de parada
-        if total_paginas and pagina >= total_paginas:
+        if total_paginas and pagina_atual >= int(total_paginas):
             break
-        if len(invoices) < 100:
+        if len(invoices) < 100 and not total_paginas:
+            # Sem info de paginação, e veio menos de 100 → última página
             break
         pagina += 1
-        if pagina > 200:  # safety limit (20.000 faturas)
+        if pagina > 500:  # safety limit (50.000 faturas)
             break
 
     return all_invoices
 
 
-def _get_field(d: dict, *keys, default=None):
-    """Pega o primeiro campo que existir no dict (tenta várias variações de nome)."""
-    for k in keys:
-        if k in d and d[k] not in (None, '', '-'):
-            return d[k]
-    return default
-
-
-def _parse_value(v):
-    """Converte valor que pode vir como string '123,45' ou '123.45' ou número."""
-    if v is None or v == '' or v == '-':
-        return 0.0
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    # Formato pt-BR: "1.234,56" → "1234.56"
-    if ',' in s:
-        s = s.replace('.', '').replace(',', '.')
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-
 def flatten_hubsoft_invoices(invoices: list) -> pd.DataFrame:
-    """Converte lista de dicts da API em DataFrame no formato esperado pelo app.
+    """Converte resposta da API HubSoft em DataFrame.
 
-    A API HubSoft pode ter variações nos nomes dos campos dependendo da versão.
-    Tentamos múltiplas variações pra ser robusto.
+    Estrutura real da API (confirmada via debug):
+    - cliente, servico, forma_cobranca são objetos aninhados
+    - Datas em formato YYYY-MM-DD
+    - Valores são números (não strings)
+    - NÃO tem 'status_pagamento' direto — derivar de data_pagamento
     """
     rows = []
     for inv in invoices:
-        # Cliente pode vir aninhado em 'cliente' ou nas chaves direto
-        cli = inv.get("cliente", {}) if isinstance(inv.get("cliente"), dict) else {}
-        servico = inv.get("servico", {}) if isinstance(inv.get("servico"), dict) else {}
+        cliente = inv.get("cliente") or {}
+        servico = inv.get("servico") or {}
+        forma = inv.get("forma_cobranca") or {}
+        if not isinstance(cliente, dict): cliente = {}
+        if not isinstance(servico, dict): servico = {}
+        if not isinstance(forma, dict): forma = {}
 
-        # Campos COM múltiplas variações de nome
-        codigo_cliente = _get_field(inv, "codigo_cliente", "id_cliente") or _get_field(cli, "codigo_cliente", "id_cliente")
-        nome = (_get_field(inv, "nome_razaosocial", "nome_cliente", "razao_social", "nome", "cliente")
-                or _get_field(cli, "nome_razaosocial", "nome", "razao_social"))
-        cpf_cnpj = (_get_field(inv, "cpf_cnpj", "cnpj_cpf", "documento")
-                    or _get_field(cli, "cpf_cnpj", "cnpj_cpf", "documento") or "")
-        cpf_cnpj = str(cpf_cnpj).replace(".", "").replace("-", "").replace("/", "") if cpf_cnpj else ""
+        data_pag = inv.get("data_pagamento")
+        data_venc = inv.get("data_vencimento")
+        valor_desc = float(inv.get("valor_desconto") or 0)
+        fatura_ativa = inv.get("fatura_ativa", True)
 
-        nosso_numero = _get_field(inv, "nosso_numero", "id_fatura", "numero_documento", "documento", "id")
-        data_venc = _get_field(inv, "data_vencimento", "vencimento", "dt_vencimento", "data_venc")
-        data_pag = _get_field(inv, "data_pagamento", "pagamento", "dt_pagamento", "data_pag", "data_recebimento")
-        valor = _parse_value(_get_field(inv, "valor", "valor_total", "valor_fatura"))
-        valor_pago = _parse_value(_get_field(inv, "valor_pago", "valor_recebido", "valor_pagto"))
-        status = _get_field(inv, "status_pagamento", "status", "situacao_pagamento", "situacao", "status_fatura")
-        forma = _get_field(inv, "forma_cobranca", "forma_pagamento", "meio_pagamento", "forma")
-        telefone = (_get_field(inv, "telefone_primario", "telefone_celular", "telefone", "celular")
-                    or _get_field(cli, "telefone_celular", "telefone_primario", "telefone"))
-        n_plano = _get_field(inv, "numero_plano", "plano", "id_plano") or _get_field(servico, "nome", "descricao")
-        servico_str = _get_field(inv, "servico", "descricao_servico", "descricao", "nome_servico") if not isinstance(inv.get("servico"), dict) else _get_field(servico, "nome", "descricao")
-        servico_status = _get_field(inv, "servico_status", "status_servico") or _get_field(servico, "status")
+        # Deriva status_pagamento (a API não fornece direto)
+        if data_pag and str(data_pag).strip() not in ("", "None", "null"):
+            status = "Pago - Desconto" if valor_desc > 0 else "Paga"
+        elif fatura_ativa is False:
+            status = "Cancelada"
+        else:
+            status = "Em Aberto"
 
         rows.append({
-            "codigo_cliente": codigo_cliente,
-            "nome_razaosocial": nome,
-            "numero_plano": n_plano,
-            "servico": servico_str,
-            "servico_status": servico_status,
-            "nosso_numero": nosso_numero,
-            "valor": valor,
-            "valor_pago": valor_pago,
-            "valor_descontos": _get_field(inv, "valor_descontos", "desconto"),
+            "codigo_cliente": cliente.get("codigo_cliente"),
+            "nome_razaosocial": cliente.get("nome_razaosocial") or cliente.get("nome_fantasia"),
+            "numero_plano": servico.get("numero_plano"),
+            "servico": servico.get("descricao"),
+            "servico_status": servico.get("servico_status"),
+            "nosso_numero": inv.get("nosso_numero"),
+            "valor": float(inv.get("valor") or 0),
+            "valor_pago": float(inv.get("valor_pago") or 0),
+            "valor_descontos": valor_desc,
             "data_vencimento": data_venc,
             "data_pagamento": data_pag,
-            "forma_cobranca": forma,
-            "cpf_cnpj": cpf_cnpj,
+            "forma_cobranca": forma.get("descricao"),
+            "cpf_cnpj": (cliente.get("cpf_cnpj") or "").replace(".", "").replace("-", "").replace("/", ""),
             "status_pagamento": status,
-            "telefone_primario": telefone,
+            "telefone_primario": cliente.get("telefone_primario"),
+            # Campos extras que podem ser úteis depois
+            "tipo_cobranca": inv.get("tipo_cobranca"),
+            "grupos_cliente": cliente.get("grupos_cliente"),
+            "id_fatura": inv.get("id_fatura"),
         })
-    df = pd.DataFrame(rows)
 
-    # Datas — tentar múltiplos formatos
+    df = pd.DataFrame(rows)
+    # Converter datas (formato ISO YYYY-MM-DD)
     for col in ['data_vencimento', 'data_pagamento']:
         if col in df.columns:
-            # Primeiro tenta auto-detect, depois formatos comuns
-            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False)
-            # Se ainda há muitos NaT, tentar formato BR DD/MM/YYYY
-            if df[col].isna().sum() > len(df) / 2:
-                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True, format='mixed')
-
-    # Normalizar status: "Em Aberto", "Paga", etc.
-    if 'status_pagamento' in df.columns:
-        df['status_pagamento'] = df['status_pagamento'].astype(str).str.strip()
-        # Normaliza variações
-        status_map = {
-            'em_aberto': 'Em Aberto', 'em aberto': 'Em Aberto', 'aberto': 'Em Aberto', 'pendente': 'Em Aberto',
-            'paga': 'Paga', 'pago': 'Paga', 'quitada': 'Paga', 'liquidada': 'Paga',
-            'pago_desconto': 'Pago - Desconto', 'pago - desconto': 'Pago - Desconto',
-            'cancelada': 'Cancelada', 'cancelado': 'Cancelada',
-        }
-        df['status_pagamento'] = df['status_pagamento'].apply(
-            lambda x: status_map.get(x.lower(), x) if isinstance(x, str) else x
-        )
-
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    # Garantir valores numéricos
+    for col in ['valor', 'valor_pago', 'valor_descontos']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
 
