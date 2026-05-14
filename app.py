@@ -105,38 +105,34 @@ def get_auth_config():
     """Lê configuração de usuários do secrets.toml (Streamlit Cloud) ou padrão."""
     try:
         # Em produção (Streamlit Cloud), usar st.secrets
+        users_dict = {}
+        for user_key in st.secrets["users"]:
+            users_dict[user_key] = {
+                "name": st.secrets["users"][user_key]["name"],
+                "password": st.secrets["users"][user_key]["password"],
+            }
         return {
-            "credentials": {
-                "usernames": {
-                    user: {
-                        "name": st.secrets["users"][user]["name"],
-                        "password": st.secrets["users"][user]["password"],
-                    }
-                    for user in st.secrets["users"]
-                }
-            },
+            "credentials": {"usernames": users_dict},
             "cookie": {
                 "name": st.secrets["cookie"]["name"],
                 "key": st.secrets["cookie"]["key"],
-                "expiry_days": st.secrets["cookie"]["expiry_days"],
+                "expiry_days": int(st.secrets["cookie"]["expiry_days"]),
             },
         }
-    except (KeyError, FileNotFoundError, st.errors.StreamlitAPIException):
+    except (KeyError, FileNotFoundError, Exception):
         # Fallback local: usuário admin com senha "jet2026"
-        # Hash gerado por: stauth.Hasher(['jet2026']).generate()
-        hashed = "$2b$12$KIXxh.Tt8VPq6dGEKf6P5OZWvE9ChWGCkN0iU0pNQOQXR9tHE3ZJq"
         return {
             "credentials": {
                 "usernames": {
                     "admin": {
                         "name": "Administrador",
-                        "password": hashed,
+                        "password": "$2b$12$qM/0czZH9ipLwQVCkKO0c.4t4QnqcZjE7du/rlquO3lRixJZQv30q",
                     }
                 }
             },
             "cookie": {
                 "name": "jet_bi_auth",
-                "key": "trocar-essa-chave-em-producao",
+                "key": "trocar-essa-chave-em-producao-32-caracteres-no-minimo",
                 "expiry_days": 7,
             },
         }
@@ -158,15 +154,12 @@ def login():
         st.markdown(f"<h1 style='text-align: center; color: {BRAND_ORANGE};'>JET BI</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #888;'>Plataforma de BI Financeiro · Grupo JET</p>", unsafe_allow_html=True)
 
+    # API 0.3.2: login() retorna tuple (name, auth_status, username)
     try:
-        authenticator.login(location="main")
-    except Exception as e:
-        st.error(f"Erro no login: {e}")
-        return None, False, None
-
-    name = st.session_state.get("name")
-    auth_status = st.session_state.get("authentication_status")
-    username = st.session_state.get("username")
+        name, auth_status, username = authenticator.login(location="main")
+    except TypeError:
+        # Fallback para versões mais antigas que usam posicional
+        name, auth_status, username = authenticator.login("Login", "main")
 
     if auth_status is False:
         st.error("Usuário ou senha inválidos.")
@@ -853,7 +846,10 @@ def main():
         )
 
         st.divider()
-        authenticator.logout(location="sidebar")
+        try:
+            authenticator.logout(location="sidebar")
+        except TypeError:
+            authenticator.logout("Logout", "sidebar")
 
     # Router
     if pagina == "📥 Upload": page_upload()
