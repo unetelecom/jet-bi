@@ -393,41 +393,105 @@ def hubsoft_get_invoices(url: str, token: str, progress_cb=None,
     return all_invoices
 
 
+def _get_field(d: dict, *keys, default=None):
+    """Pega o primeiro campo que existir no dict (tenta várias variações de nome)."""
+    for k in keys:
+        if k in d and d[k] not in (None, '', '-'):
+            return d[k]
+    return default
+
+
+def _parse_value(v):
+    """Converte valor que pode vir como string '123,45' ou '123.45' ou número."""
+    if v is None or v == '' or v == '-':
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip()
+    # Formato pt-BR: "1.234,56" → "1234.56"
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
 def flatten_hubsoft_invoices(invoices: list) -> pd.DataFrame:
-    """Converte lista de dicts da API em DataFrame no mesmo formato do XLSX."""
+    """Converte lista de dicts da API em DataFrame no formato esperado pelo app.
+
+    A API HubSoft pode ter variações nos nomes dos campos dependendo da versão.
+    Tentamos múltiplas variações pra ser robusto.
+    """
     rows = []
     for inv in invoices:
-        # API pode estruturar de jeito ligeiramente diferente — tentamos várias chaves
+        # Cliente pode vir aninhado em 'cliente' ou nas chaves direto
         cli = inv.get("cliente", {}) if isinstance(inv.get("cliente"), dict) else {}
-        endereco = cli.get("endereco_principal", {}) if isinstance(cli.get("endereco_principal"), dict) else {}
+        servico = inv.get("servico", {}) if isinstance(inv.get("servico"), dict) else {}
+
+        # Campos COM múltiplas variações de nome
+        codigo_cliente = _get_field(inv, "codigo_cliente", "id_cliente") or _get_field(cli, "codigo_cliente", "id_cliente")
+        nome = (_get_field(inv, "nome_razaosocial", "nome_cliente", "razao_social", "nome", "cliente")
+                or _get_field(cli, "nome_razaosocial", "nome", "razao_social"))
+        cpf_cnpj = (_get_field(inv, "cpf_cnpj", "cnpj_cpf", "documento")
+                    or _get_field(cli, "cpf_cnpj", "cnpj_cpf", "documento") or "")
+        cpf_cnpj = str(cpf_cnpj).replace(".", "").replace("-", "").replace("/", "") if cpf_cnpj else ""
+
+        nosso_numero = _get_field(inv, "nosso_numero", "id_fatura", "numero_documento", "documento", "id")
+        data_venc = _get_field(inv, "data_vencimento", "vencimento", "dt_vencimento", "data_venc")
+        data_pag = _get_field(inv, "data_pagamento", "pagamento", "dt_pagamento", "data_pag", "data_recebimento")
+        valor = _parse_value(_get_field(inv, "valor", "valor_total", "valor_fatura"))
+        valor_pago = _parse_value(_get_field(inv, "valor_pago", "valor_recebido", "valor_pagto"))
+        status = _get_field(inv, "status_pagamento", "status", "situacao_pagamento", "situacao", "status_fatura")
+        forma = _get_field(inv, "forma_cobranca", "forma_pagamento", "meio_pagamento", "forma")
+        telefone = (_get_field(inv, "telefone_primario", "telefone_celular", "telefone", "celular")
+                    or _get_field(cli, "telefone_celular", "telefone_primario", "telefone"))
+        n_plano = _get_field(inv, "numero_plano", "plano", "id_plano") or _get_field(servico, "nome", "descricao")
+        servico_str = _get_field(inv, "servico", "descricao_servico", "descricao", "nome_servico") if not isinstance(inv.get("servico"), dict) else _get_field(servico, "nome", "descricao")
+        servico_status = _get_field(inv, "servico_status", "status_servico") or _get_field(servico, "status")
 
         rows.append({
-            "codigo_cliente": inv.get("codigo_cliente") or cli.get("codigo_cliente"),
-            "nome_razaosocial": (inv.get("nome_razaosocial") or cli.get("nome_razaosocial")
-                                  or cli.get("nome") or inv.get("nome")),
-            "numero_plano": inv.get("numero_plano") or inv.get("plano"),
-            "servico": inv.get("servico") or inv.get("descricao_servico"),
-            "servico_status": inv.get("servico_status") or inv.get("status_servico"),
-            "nosso_numero": inv.get("nosso_numero") or inv.get("numero_documento"),
-            "valor": float(str(inv.get("valor", 0)).replace(",", ".") or 0),
-            "valor_pago": float(str(inv.get("valor_pago", 0)).replace(",", ".") or 0),
-            "valor_descontos": inv.get("valor_descontos"),
-            "data_vencimento": inv.get("data_vencimento") or inv.get("vencimento"),
-            "data_pagamento": inv.get("data_pagamento") or inv.get("pagamento"),
-            "forma_cobranca": inv.get("forma_cobranca") or inv.get("forma_pagamento"),
-            "cpf_cnpj": (inv.get("cpf_cnpj") or cli.get("cpf_cnpj") or "").replace(".", "").replace("-", "").replace("/", ""),
-            "status_pagamento": inv.get("status_pagamento") or inv.get("status"),
-            "telefone_primario": cli.get("telefone_celular") or cli.get("telefone_primario") or inv.get("telefone"),
+            "codigo_cliente": codigo_cliente,
+            "nome_razaosocial": nome,
+            "numero_plano": n_plano,
+            "servico": servico_str,
+            "servico_status": servico_status,
+            "nosso_numero": nosso_numero,
+            "valor": valor,
+            "valor_pago": valor_pago,
+            "valor_descontos": _get_field(inv, "valor_descontos", "desconto"),
+            "data_vencimento": data_venc,
+            "data_pagamento": data_pag,
+            "forma_cobranca": forma,
+            "cpf_cnpj": cpf_cnpj,
+            "status_pagamento": status,
+            "telefone_primario": telefone,
         })
     df = pd.DataFrame(rows)
-    # Datas
+
+    # Datas — tentar múltiplos formatos
     for col in ['data_vencimento', 'data_pagamento']:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-    # Valores
-    for col in ['valor', 'valor_pago']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            # Primeiro tenta auto-detect, depois formatos comuns
+            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=False)
+            # Se ainda há muitos NaT, tentar formato BR DD/MM/YYYY
+            if df[col].isna().sum() > len(df) / 2:
+                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True, format='mixed')
+
+    # Normalizar status: "Em Aberto", "Paga", etc.
+    if 'status_pagamento' in df.columns:
+        df['status_pagamento'] = df['status_pagamento'].astype(str).str.strip()
+        # Normaliza variações
+        status_map = {
+            'em_aberto': 'Em Aberto', 'em aberto': 'Em Aberto', 'aberto': 'Em Aberto', 'pendente': 'Em Aberto',
+            'paga': 'Paga', 'pago': 'Paga', 'quitada': 'Paga', 'liquidada': 'Paga',
+            'pago_desconto': 'Pago - Desconto', 'pago - desconto': 'Pago - Desconto',
+            'cancelada': 'Cancelada', 'cancelado': 'Cancelada',
+        }
+        df['status_pagamento'] = df['status_pagamento'].apply(
+            lambda x: status_map.get(x.lower(), x) if isinstance(x, str) else x
+        )
+
     return df
 
 
@@ -671,6 +735,10 @@ def page_hubsoft_api():
         data_inicio_str = data_inicio.strftime("%Y-%m-%d") if data_inicio else None
         data_fim_str = data_fim.strftime("%Y-%m-%d") if data_fim else None
 
+    # Modo debug
+    debug_mode = st.checkbox("🔬 Modo debug (mostra resposta crua da API)",
+                              help="Útil pra diagnosticar problemas. Mostra o JSON da 1ª fatura.")
+
     if submit:
         if not (url and client_id and client_secret and username and password):
             st.error("Preencha todos os campos.")
@@ -690,6 +758,15 @@ def page_hubsoft_api():
                                                  data_inicio=data_inicio_str,
                                                  data_fim=data_fim_str)
             status.success(f"✅ {len(invoices_raw)} faturas baixadas da API.")
+
+            # DEBUG: mostrar JSON cru da 1ª fatura
+            if debug_mode and len(invoices_raw) > 0:
+                st.divider()
+                st.subheader("🔬 Debug: JSON cru da 1ª fatura (da API)")
+                st.markdown("**Copia este JSON e mande pro suporte para mapear os campos corretamente:**")
+                st.json(invoices_raw[0])
+                st.markdown("**Lista de chaves do 1º registro:**")
+                st.code(", ".join(invoices_raw[0].keys()) if isinstance(invoices_raw[0], dict) else "(não é dict)")
 
             status.info("🔄 Convertendo dados...")
             df = flatten_hubsoft_invoices(invoices_raw)
