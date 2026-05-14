@@ -272,6 +272,128 @@ def parse_btg_csv(file) -> pd.DataFrame:
     return df[['Data', 'Valor', 'memo', 'banco']]
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# INTEGRAÇÃO API HUBSOFT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def hubsoft_authenticate(url: str, client_id: str, client_secret: str,
+                         username: str, password: str) -> str:
+    """Faz OAuth2 password grant e retorna access_token."""
+    import requests
+    base = url.rstrip('/')
+    resp = requests.post(
+        f"{base}/oauth/token",
+        json={
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "password",
+            "username": username,
+            "password": password,
+        },
+        timeout=30,
+        headers={"Accept": "application/json"},
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if "access_token" not in data:
+        raise ValueError(f"Resposta sem access_token: {data}")
+    return data["access_token"]
+
+
+def hubsoft_get_invoices(url: str, token: str, progress_cb=None) -> list:
+    """Baixa todas as faturas paginadas. Retorna lista de dicts."""
+    import requests
+    base = url.rstrip('/')
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    all_invoices = []
+    # Tenta os endpoints conhecidos da API HubSoft
+    endpoints = [
+        "/api/v1/integracao/cliente_servico_fatura",
+        "/api/v1/integracao/faturas",
+        "/api/v1/integracao/fatura",
+    ]
+    working_endpoint = None
+    for endpoint in endpoints:
+        try:
+            test = requests.get(f"{base}{endpoint}", headers=headers,
+                                params={"limit": 1, "page": 1}, timeout=30)
+            if test.status_code == 200:
+                working_endpoint = endpoint
+                break
+        except Exception:
+            continue
+    if not working_endpoint:
+        raise ValueError("Nenhum endpoint de faturas conhecido respondeu. "
+                         "Verifique a documentação da sua API HubSoft.")
+
+    page = 1
+    while True:
+        resp = requests.get(
+            f"{base}{working_endpoint}",
+            headers=headers,
+            params={"limit": 100, "page": page},
+            timeout=60,
+        )
+        if resp.status_code == 401:
+            raise PermissionError("Token expirou ou credenciais inválidas.")
+        resp.raise_for_status()
+        data = resp.json()
+        # API pode retornar dict {faturas: [...]} ou lista direta
+        if isinstance(data, dict):
+            invoices = data.get("faturas") or data.get("data") or data.get("results") or []
+        else:
+            invoices = data
+        if not invoices:
+            break
+        all_invoices.extend(invoices)
+        if progress_cb:
+            progress_cb(len(all_invoices))
+        if len(invoices) < 100:
+            break
+        page += 1
+        if page > 100:  # safety limit
+            break
+    return all_invoices
+
+
+def flatten_hubsoft_invoices(invoices: list) -> pd.DataFrame:
+    """Converte lista de dicts da API em DataFrame no mesmo formato do XLSX."""
+    rows = []
+    for inv in invoices:
+        # API pode estruturar de jeito ligeiramente diferente — tentamos várias chaves
+        cli = inv.get("cliente", {}) if isinstance(inv.get("cliente"), dict) else {}
+        endereco = cli.get("endereco_principal", {}) if isinstance(cli.get("endereco_principal"), dict) else {}
+
+        rows.append({
+            "codigo_cliente": inv.get("codigo_cliente") or cli.get("codigo_cliente"),
+            "nome_razaosocial": (inv.get("nome_razaosocial") or cli.get("nome_razaosocial")
+                                  or cli.get("nome") or inv.get("nome")),
+            "numero_plano": inv.get("numero_plano") or inv.get("plano"),
+            "servico": inv.get("servico") or inv.get("descricao_servico"),
+            "servico_status": inv.get("servico_status") or inv.get("status_servico"),
+            "nosso_numero": inv.get("nosso_numero") or inv.get("numero_documento"),
+            "valor": float(str(inv.get("valor", 0)).replace(",", ".") or 0),
+            "valor_pago": float(str(inv.get("valor_pago", 0)).replace(",", ".") or 0),
+            "valor_descontos": inv.get("valor_descontos"),
+            "data_vencimento": inv.get("data_vencimento") or inv.get("vencimento"),
+            "data_pagamento": inv.get("data_pagamento") or inv.get("pagamento"),
+            "forma_cobranca": inv.get("forma_cobranca") or inv.get("forma_pagamento"),
+            "cpf_cnpj": (inv.get("cpf_cnpj") or cli.get("cpf_cnpj") or "").replace(".", "").replace("-", "").replace("/", ""),
+            "status_pagamento": inv.get("status_pagamento") or inv.get("status"),
+            "telefone_primario": cli.get("telefone_celular") or cli.get("telefone_primario") or inv.get("telefone"),
+        })
+    df = pd.DataFrame(rows)
+    # Datas
+    for col in ['data_vencimento', 'data_pagamento']:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    # Valores
+    for col in ['valor', 'valor_pago']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    return df
+
+
 def filter_intercompany_and_judicial(df_ext: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Filtra transações que não são receita de cliente (intercompany, judicial, devoluções)."""
     if len(df_ext) == 0:
@@ -460,6 +582,125 @@ def run_match(fat: pd.DataFrame, ext: pd.DataFrame, date_start: str, date_end: s
 # ═══════════════════════════════════════════════════════════════════════════════
 # PÁGINAS DO APP
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def page_hubsoft_api():
+    st.title("🔌 Importar do HubSoft")
+    st.markdown("Sincroniza diretamente com a API do HubSoft — sem precisar exportar XLSX.")
+
+    # Verificar se há credenciais em secrets
+    has_secrets = False
+    secret_url = secret_cid = secret_csec = secret_user = secret_pwd = None
+    try:
+        secret_url = st.secrets["hubsoft"]["url"]
+        secret_cid = st.secrets["hubsoft"]["client_id"]
+        secret_csec = st.secrets["hubsoft"]["client_secret"]
+        secret_user = st.secrets["hubsoft"]["username"]
+        secret_pwd = st.secrets["hubsoft"]["password"]
+        has_secrets = True
+    except Exception:
+        has_secrets = False
+
+    if has_secrets:
+        st.success("✅ Credenciais HubSoft configuradas no servidor (Secrets).")
+        st.caption(f"URL: `{secret_url}` · Usuário: `{secret_user}`")
+        usar_secrets = st.checkbox("Usar credenciais salvas", value=True)
+    else:
+        st.warning("⚠️ Credenciais HubSoft não estão no Secrets do app. "
+                   "Você pode preencher abaixo (só pra esta sessão) ou configurar permanentemente.")
+        usar_secrets = False
+
+    if not usar_secrets:
+        with st.form("hubsoft_creds"):
+            st.markdown("**Credenciais HubSoft:**")
+            url = st.text_input("URL da API", value=secret_url or "https://api.SEU-PROVEDOR.hubsoft.com.br",
+                                help="Ex: https://api.jettelecom.hubsoft.com.br")
+            c1, c2 = st.columns(2)
+            client_id = c1.text_input("client_id", value=secret_cid or "")
+            client_secret = c2.text_input("client_secret", type="password", value=secret_csec or "")
+            c3, c4 = st.columns(2)
+            username = c3.text_input("usuário (e-mail)", value=secret_user or "")
+            password = c4.text_input("senha", type="password", value=secret_pwd or "")
+            submit = st.form_submit_button("🔄 Sincronizar Faturas", type="primary", use_container_width=True)
+    else:
+        url, client_id, client_secret, username, password = secret_url, secret_cid, secret_csec, secret_user, secret_pwd
+        submit = st.button("🔄 Sincronizar Faturas Agora", type="primary", use_container_width=True)
+
+    if submit:
+        if not (url and client_id and client_secret and username and password):
+            st.error("Preencha todos os campos.")
+            return
+
+        progress = st.empty()
+        status = st.empty()
+        try:
+            status.info("🔐 Autenticando no HubSoft...")
+            token = hubsoft_authenticate(url, client_id, client_secret, username, password)
+            status.success("✅ Autenticado!")
+
+            status.info("📥 Baixando faturas (pode levar alguns minutos)...")
+            def cb(count):
+                progress.text(f"  → {count} faturas baixadas...")
+            invoices_raw = hubsoft_get_invoices(url, token, cb)
+            status.success(f"✅ {len(invoices_raw)} faturas baixadas da API.")
+
+            status.info("🔄 Convertendo dados...")
+            df = flatten_hubsoft_invoices(invoices_raw)
+            st.session_state['fat'] = df
+            st.session_state['hubsoft_sync_time'] = datetime.now()
+
+            status.success(f"✅ Pronto! {len(df)} faturas importadas · R$ {df['valor'].sum():,.2f} faturado.")
+            st.balloons()
+
+            # Mostra preview
+            st.subheader("Preview dos dados importados")
+            st.dataframe(df.head(10), use_container_width=True)
+            st.info("👉 Vá para **Resumo**, **Inadimplência**, **Clientes** etc. para ver os dashboards. "
+                    "Para conciliar com banco, ainda precisa subir os extratos pela página **Upload**.")
+
+        except PermissionError as e:
+            st.error(f"🔒 Erro de autenticação: {e}")
+            st.markdown("**Verifique:**\n"
+                        "- O client_id e client_secret estão corretos?\n"
+                        "- A senha do usuário API foi renovada recentemente?\n"
+                        "- O usuário tem permissão de acesso à API?")
+        except ValueError as e:
+            st.error(f"⚠️ {e}")
+        except Exception as e:
+            st.error(f"❌ Erro: {type(e).__name__}: {e}")
+            st.markdown("**Possíveis causas:**\n"
+                        "- URL da API errada (confira `https://api.SEU-PROVEDOR.hubsoft.com.br`)\n"
+                        "- Sem internet no servidor (raro)\n"
+                        "- API do HubSoft fora do ar momentaneamente")
+
+    # Status da última sincronização
+    if 'hubsoft_sync_time' in st.session_state:
+        st.divider()
+        st.caption(f"Última sincronização: {st.session_state['hubsoft_sync_time']:%d/%m/%Y %H:%M:%S}")
+
+    # Instruções
+    with st.expander("ℹ️ Como configurar credenciais permanentemente"):
+        st.markdown("""
+Para evitar digitar as credenciais toda vez, configure no **Secrets** do Streamlit Cloud:
+
+1. No painel do app, **Manage app** → **⚙️ Settings** → **Secrets**
+2. Adicione no final do arquivo:
+
+```toml
+[hubsoft]
+url = "https://api.SEU-PROVEDOR.hubsoft.com.br"
+client_id = "SEU_CLIENT_ID"
+client_secret = "SEU_CLIENT_SECRET"
+username = "api@SEU-PROVEDOR.com.br"
+password = "SUA_SENHA"
+```
+
+3. Save → Reboot app
+
+Depois, basta clicar em **"Sincronizar Faturas Agora"** sem precisar digitar nada.
+
+> **Segurança:** o conteúdo do Secrets nunca aparece no GitHub público — fica só no servidor do Streamlit Cloud.
+        """)
+
 
 def page_upload():
     st.title("📥 Upload de Dados")
@@ -840,8 +1081,8 @@ def main():
 
         pagina = st.radio(
             "Menu",
-            ["📥 Upload", "📊 Resumo", "🔍 Conciliação", "🚨 Inadimplência",
-             "👥 Clientes", "🏆 Top Clientes", "💾 Exportar"],
+            ["📥 Upload", "🔌 HubSoft API", "📊 Resumo", "🔍 Conciliação",
+             "🚨 Inadimplência", "👥 Clientes", "🏆 Top Clientes", "💾 Exportar"],
             label_visibility="collapsed",
         )
 
@@ -853,6 +1094,7 @@ def main():
 
     # Router
     if pagina == "📥 Upload": page_upload()
+    elif pagina == "🔌 HubSoft API": page_hubsoft_api()
     elif pagina == "📊 Resumo": page_resumo()
     elif pagina == "🔍 Conciliação": page_conciliacao()
     elif pagina == "🚨 Inadimplência": page_inadimplencia()
