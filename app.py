@@ -300,59 +300,96 @@ def hubsoft_authenticate(url: str, client_id: str, client_secret: str,
     return data["access_token"]
 
 
-def hubsoft_get_invoices(url: str, token: str, progress_cb=None) -> list:
-    """Baixa todas as faturas paginadas. Retorna lista de dicts."""
+def hubsoft_get_invoices(url: str, token: str, progress_cb=None,
+                          data_inicio: str = None, data_fim: str = None) -> list:
+    """Baixa todas as faturas paginadas. Retorna lista de dicts.
+
+    Endpoint oficial: /api/v1/integracao/financeiro/fatura
+    Documentação: https://wiki.hubsoft.com.br
+    """
     import requests
     base = url.rstrip('/')
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    all_invoices = []
-    # Tenta os endpoints conhecidos da API HubSoft
-    endpoints = [
-        "/api/v1/integracao/cliente_servico_fatura",
-        "/api/v1/integracao/faturas",
-        "/api/v1/integracao/fatura",
-    ]
-    working_endpoint = None
-    for endpoint in endpoints:
-        try:
-            test = requests.get(f"{base}{endpoint}", headers=headers,
-                                params={"limit": 1, "page": 1}, timeout=30)
-            if test.status_code == 200:
-                working_endpoint = endpoint
-                break
-        except Exception:
-            continue
-    if not working_endpoint:
-        raise ValueError("Nenhum endpoint de faturas conhecido respondeu. "
-                         "Verifique a documentação da sua API HubSoft.")
+    endpoint = "/api/v1/integracao/financeiro/fatura"
 
-    page = 1
+    all_invoices = []
+    pagina = 1
+    erros_endpoint = []
+
     while True:
-        resp = requests.get(
-            f"{base}{working_endpoint}",
-            headers=headers,
-            params={"limit": 100, "page": page},
-            timeout=60,
-        )
+        params = {"itens_por_pagina": 100, "pagina": pagina}
+        if data_inicio:
+            params["data_inicio"] = data_inicio
+        if data_fim:
+            params["data_fim"] = data_fim
+
+        try:
+            resp = requests.get(
+                f"{base}{endpoint}",
+                headers=headers,
+                params=params,
+                timeout=120,
+            )
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Falha de rede: {e}")
+
         if resp.status_code == 401:
             raise PermissionError("Token expirou ou credenciais inválidas.")
-        resp.raise_for_status()
-        data = resp.json()
-        # API pode retornar dict {faturas: [...]} ou lista direta
+        if resp.status_code == 404:
+            # Tentar endpoint legado como fallback
+            endpoint_alt = "/api/v1/integracao/cliente/financeiro"
+            erros_endpoint.append(f"{endpoint} → 404")
+            try:
+                resp = requests.get(
+                    f"{base}{endpoint_alt}",
+                    headers=headers, params=params, timeout=120,
+                )
+                if resp.status_code == 200:
+                    endpoint = endpoint_alt
+                else:
+                    erros_endpoint.append(f"{endpoint_alt} → {resp.status_code}")
+                    raise ValueError(
+                        f"Endpoints de faturas retornaram erro:\n" +
+                        "\n".join(f"  - {e}" for e in erros_endpoint) +
+                        f"\n\nResposta: {resp.text[:300]}"
+                    )
+            except requests.exceptions.RequestException as e:
+                raise ConnectionError(f"Falha de rede: {e}")
+
+        if resp.status_code != 200:
+            raise ValueError(f"API retornou HTTP {resp.status_code}: {resp.text[:500]}")
+
+        try:
+            data = resp.json()
+        except Exception:
+            raise ValueError(f"Resposta da API não é JSON válido: {resp.text[:300]}")
+
+        # API HubSoft retorna geralmente: {"status": "success", "faturas": [...], "paginacao": {...}}
         if isinstance(data, dict):
-            invoices = data.get("faturas") or data.get("data") or data.get("results") or []
+            invoices = (data.get("faturas") or data.get("data") or
+                       data.get("results") or data.get("itens") or [])
+            # Pegar info de paginação se disponível
+            pag_info = data.get("paginacao", {})
+            total_paginas = pag_info.get("total_de_paginas") or pag_info.get("total_paginas")
         else:
             invoices = data
+            total_paginas = None
+
         if not invoices:
             break
         all_invoices.extend(invoices)
         if progress_cb:
             progress_cb(len(all_invoices))
+
+        # Critério de parada
+        if total_paginas and pagina >= total_paginas:
+            break
         if len(invoices) < 100:
             break
-        page += 1
-        if page > 100:  # safety limit
+        pagina += 1
+        if pagina > 200:  # safety limit (20.000 faturas)
             break
+
     return all_invoices
 
 
@@ -625,6 +662,15 @@ def page_hubsoft_api():
         url, client_id, client_secret, username, password = secret_url, secret_cid, secret_csec, secret_user, secret_pwd
         submit = st.button("🔄 Sincronizar Faturas Agora", type="primary", use_container_width=True)
 
+    # Filtro de período (opcional)
+    with st.expander("📅 Filtro por período (opcional)"):
+        st.caption("Se vazio, baixa todas as faturas. Recomendado limitar pra os últimos 6-12 meses.")
+        c1, c2 = st.columns(2)
+        data_inicio = c1.date_input("De", value=None, key="hs_de")
+        data_fim = c2.date_input("Até", value=None, key="hs_ate")
+        data_inicio_str = data_inicio.strftime("%Y-%m-%d") if data_inicio else None
+        data_fim_str = data_fim.strftime("%Y-%m-%d") if data_fim else None
+
     if submit:
         if not (url and client_id and client_secret and username and password):
             st.error("Preencha todos os campos.")
@@ -640,7 +686,9 @@ def page_hubsoft_api():
             status.info("📥 Baixando faturas (pode levar alguns minutos)...")
             def cb(count):
                 progress.text(f"  → {count} faturas baixadas...")
-            invoices_raw = hubsoft_get_invoices(url, token, cb)
+            invoices_raw = hubsoft_get_invoices(url, token, cb,
+                                                 data_inicio=data_inicio_str,
+                                                 data_fim=data_fim_str)
             status.success(f"✅ {len(invoices_raw)} faturas baixadas da API.")
 
             status.info("🔄 Convertendo dados...")
