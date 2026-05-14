@@ -949,15 +949,34 @@ def page_inadimplencia():
 
     fat = st.session_state['fat']
     HOJE = pd.Timestamp(datetime.now().date())
-    em_aberto = fat[fat['status_pagamento'] == 'Em Aberto']
+
+    # Validações defensivas
+    if 'status_pagamento' not in fat.columns or 'data_vencimento' not in fat.columns:
+        st.error("Os dados carregados não têm as colunas necessárias (status_pagamento, data_vencimento). "
+                 "Use a página Upload ou re-sincronize pela HubSoft API.")
+        return
+
+    em_aberto = fat[fat['status_pagamento'] == 'Em Aberto'].copy()
+    if len(em_aberto) == 0:
+        st.success("🎉 Nenhuma fatura em aberto na base atual!")
+        st.info("Se isso parece errado, verifique se a base está completa. "
+                "Pela API HubSoft, use o filtro de período para baixar histórico maior.")
+        return
+
     vencidas = em_aberto[em_aberto['data_vencimento'] < HOJE].copy()
     vencidas['dias_atraso'] = (HOJE - vencidas['data_vencimento']).dt.days
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Vencido", f"R$ {vencidas['valor'].sum():,.0f}", f"{len(vencidas)} faturas")
-    c2.metric("Clientes Inadimplentes", f"{vencidas['codigo_cliente'].nunique()}")
-    over_90 = vencidas[vencidas['dias_atraso'] > 90]
-    c3.metric("Acima de 90 dias", f"R$ {over_90['valor'].sum():,.0f}", f"{len(over_90)} faturas (jurídico)", delta_color="inverse")
+    c2.metric("Clientes Inadimplentes", f"{vencidas['codigo_cliente'].nunique() if len(vencidas) > 0 else 0}")
+    over_90 = vencidas[vencidas['dias_atraso'] > 90] if len(vencidas) > 0 else pd.DataFrame()
+    c3.metric("Acima de 90 dias", f"R$ {over_90['valor'].sum() if len(over_90) > 0 else 0:,.0f}",
+              f"{len(over_90)} faturas (jurídico)", delta_color="inverse")
+
+    if len(vencidas) == 0:
+        st.success("🎉 Nenhuma fatura vencida! Toda a carteira está em dia.")
+        st.info(f"Carteira a vencer: {len(em_aberto)} faturas · R$ {em_aberto['valor'].sum():,.2f}")
+        return
 
     # Aging
     st.subheader("Aging — Distribuição por Faixa de Atraso")
@@ -971,21 +990,23 @@ def page_inadimplencia():
                                'Clientes': sub['codigo_cliente'].nunique()})
     aging_df = pd.DataFrame(aging_data)
 
-    fig = px.bar(aging_df, x='Faixa', y='Valor', text='Valor',
-                 color='Faixa',
-                 color_discrete_sequence=['#FFEB9C', '#FFD966', '#FFCC99', '#FF9966', '#FF6666', '#CC0000'])
-    fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
-    fig.update_layout(height=400, showlegend=False, yaxis_tickformat='R$ ,.0f')
-    st.plotly_chart(fig, use_container_width=True)
+    if len(aging_df) > 0:
+        fig = px.bar(aging_df, x='Faixa', y='Valor', text='Valor',
+                     color='Faixa',
+                     color_discrete_sequence=['#FFEB9C', '#FFD966', '#FFCC99', '#FF9966', '#FF6666', '#CC0000'])
+        fig.update_traces(texttemplate='R$ %{text:,.0f}', textposition='outside')
+        fig.update_layout(height=400, showlegend=False, yaxis_tickformat='R$ ,.0f')
+        st.plotly_chart(fig, use_container_width=True)
 
     # Top inadimplentes
     st.subheader("Top Inadimplentes")
-    top = vencidas.groupby(['codigo_cliente', 'nome_razaosocial', 'cpf_cnpj', 'telefone_primario']).agg(
+    cols_disp = [c for c in ['codigo_cliente', 'nome_razaosocial', 'cpf_cnpj', 'telefone_primario']
+                 if c in vencidas.columns]
+    top = vencidas.groupby(cols_disp).agg(
         Faturas=('valor', 'count'),
         Valor=('valor', 'sum'),
         Atraso_Max=('dias_atraso', 'max'),
     ).reset_index().sort_values('Valor', ascending=False)
-    top.columns = ['Cód', 'Cliente', 'CPF/CNPJ', 'Telefone', 'Faturas', 'Valor', 'Atraso Max (d)']
     st.dataframe(top, use_container_width=True, height=500)
 
 
